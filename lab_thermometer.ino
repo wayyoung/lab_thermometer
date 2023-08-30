@@ -82,12 +82,12 @@ void setup()
   .onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
+      Serial.println("Start updating sketch");
     else // U_SPIFFS
-      type = "filesystem";
+      Serial.println("Start updating filesystem");
 
     // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    Serial.println("Start updating " + type);
+    
   })
   .onEnd([]() {
     Serial.println("\nEnd");
