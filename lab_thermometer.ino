@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "DHT.h"
@@ -62,6 +63,7 @@ FirebaseConfig config;
 static bool create_device_doc(FirebaseData *fbdo, char const *project, char *device_doc_path, char *name);
 static bool led_blink_enabled(FirebaseData *fbdo, const char *project, char *device_doc_path);
 static bool add_record(FirebaseData *fbdo, const char *project, char *device_doc_path, char *utc_timestr, double t, double h);
+bool in_OTA = false;
 void setup()
 {
   Serial.begin(115200);
@@ -70,7 +72,8 @@ void setup()
   dht.begin(); // initialize the DHT sensor
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+  while (WiFi.waitForConnectResult() != WL_CONNECTED)
+  {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
@@ -79,32 +82,34 @@ void setup()
   Serial.println(WiFi.localIP());
 
   ArduinoOTA
-  .onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      Serial.println("Start updating sketch");
-    else // U_SPIFFS
-      Serial.println("Start updating filesystem");
+      .onStart([]()
+               {
+                 String type;
+                 if (ArduinoOTA.getCommand() == U_FLASH)
+                   Serial.println("Start updating sketch");
+                 else // U_SPIFFS
+                   Serial.println("Start updating filesystem");
 
-    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    
-  })
-  .onEnd([]() {
-    Serial.println("\nEnd");
-  })
-  .onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  })
-  .onError([](ota_error_t error) {
+                 in_OTA = true;
+
+                 // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+               })
+      .onEnd([]()
+             { in_OTA = false; 
+               Serial.println("\nEnd"); })
+      .onProgress([](unsigned int progress, unsigned int total)
+                  { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
+      .onError([](ota_error_t error)
+               {
     Serial.printf("Error[%u]: ", error);
     if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
     else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
     else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
     else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
+    else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
 
-  ArduinoOTA.begin();
+  ArduinoOTA.setHostname(DEVICE);
+  ArduinoOTA.setPassword("12345678");
 
   Serial.println(F("Turn on LED for 5 secs then turn off 3 secs"));
   digitalWrite(LED_BUILTIN, HIGH);
@@ -140,12 +145,15 @@ void setup()
   // You can use TCP KeepAlive in FirebaseData object and tracking the server connection status, please read this for detail.
   // https://github.com/mobizt/Firebase-ESP-Client#about-firebasedata-object
   fbdo.keepAlive(5, 5, 1);
+  ArduinoOTA.begin();
 }
 
 bool device_doc_exist = false;
-int inner_loop_delay = 0;
 bool led_on = false;
 bool led_blink = false;
+unsigned long led_ms = 0;
+unsigned long sample_ms = 0;
+
 void loop()
 {
   struct tm timeinfo;
@@ -157,33 +165,35 @@ void loop()
 
   digitalWrite(LED_BUILTIN, LOW);
   ArduinoOTA.handle();
-  
 
-  if (!Firebase.ready())
+  if ((millis() - led_ms) > 1000)
   {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(200);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(200);
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(200);
-    digitalWrite(LED_BUILTIN, LOW);
-    firebase_ready = false;
-    Serial.println("ERROR Firebase not ready");
-    delay(100);
-  }
-  else if (led_blink)
-  {
-    led_on = !led_on;
-    if (led_on)
+    if (!Firebase.ready())
+    {
       digitalWrite(LED_BUILTIN, HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(100);
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN, LOW);
+      firebase_ready = false;
+      Serial.println("ERROR Firebase not ready");
+    }
+    else if (led_blink)
+    {
+      led_on = !led_on;
+      if (led_on)
+        digitalWrite(LED_BUILTIN, HIGH);
+    }
+    led_ms = millis();
   }
 
-  if (inner_loop_delay < SAMPLE_DELAY)
+  if (in_OTA || (millis() - sample_ms) < SAMPLE_DELAY)
   {
     goto LOOP_DONE;
   }
-  inner_loop_delay = 0;
+  sample_ms = millis();
 
   // Read humidity
   h = (double)dht.readHumidity();
@@ -262,8 +272,7 @@ void loop()
   }
 
 LOOP_DONE:
-  delay(1000);
-  inner_loop_delay += 1000;
+  delay(1);
 }
 
 // The Firestore payload upload callback function
