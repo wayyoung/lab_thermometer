@@ -1,13 +1,15 @@
 #include <WiFi.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 #include "DHT.h"
 #include "time.h"
-#include "secret.h"
+#include "arduino_secrets.h"
 
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 
 /*
- * Need to create secret.h with following define:
+ * Need to create arduino_secrets.h with following define:
  *
  *   #define SECRET_DEVICE "YOUR DEVICE NAME"
  *
@@ -68,13 +70,41 @@ void setup()
   dht.begin(); // initialize the DHT sensor
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(1000);
-    Serial.print(".");
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
   }
   Serial.println(F("Connected to WiFi network with IP Address:"));
   Serial.println(WiFi.localIP());
+
+  ArduinoOTA
+  .onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH)
+      type = "sketch";
+    else // U_SPIFFS
+      type = "filesystem";
+
+    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+    Serial.println("Start updating " + type);
+  })
+  .onEnd([]() {
+    Serial.println("\nEnd");
+  })
+  .onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  })
+  .onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+
+  ArduinoOTA.begin();
 
   Serial.println(F("Turn on LED for 5 secs then turn off 3 secs"));
   digitalWrite(LED_BUILTIN, HIGH);
@@ -126,6 +156,8 @@ void loop()
   int cnt = 0;
 
   digitalWrite(LED_BUILTIN, LOW);
+  ArduinoOTA.handle();
+  
 
   if (!Firebase.ready())
   {
