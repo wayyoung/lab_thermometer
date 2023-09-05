@@ -4,23 +4,15 @@
 #include <ArduinoOTA.h>
 #include "DHT.h"
 #include "time.h"
-#include "arduino_secrets.h"
-
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 
 /*
- * Need to create arduino_secrets.h with following define:
+ *  Please update the following settings in "Secret" tab:
  *
- *   #define SECRET_DEVICE "YOUR DEVICE NAME"
- *
- *   #define SECRET_WIFI_SSID "SSID"
- *   #define SECRET_WIFI_PASSWORD "PASSWORD"
- *
- *   #define SECRET_API_KEY "check owner"
- *   #define SECRET_FIREBASE_PROJECT_ID "check owner"
- *   #define SECRET_USER_EMAIL "check owner"
- *   #define SECRET_USER_PASSWORD "check owner"
+ *  SECRET_DEVICE         "YOUR DEVICE NAME"
+ *  SECRET_WIFI_SSID      "SSID"
+ *  SECRET_WIFI_PASSWORD  "PASSWORD"
  */
 
 #define DEVICE SECRET_DEVICE
@@ -75,7 +67,7 @@ void setup()
   while (WiFi.waitForConnectResult() != WL_CONNECTED)
   {
     Serial.println("Connection Failed! Rebooting...");
-    delay(5000);
+    delay(1000);
     ESP.restart();
   }
   Serial.println(F("Connected to WiFi network with IP Address:"));
@@ -109,7 +101,7 @@ void setup()
     else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
 
   ArduinoOTA.setHostname(DEVICE);
-  ArduinoOTA.setPassword("12345678");
+  ArduinoOTA.setPassword(SECRET_OTA_PASSWORD);
 
   Serial.println(F("Turn on LED for 5 secs then turn off 3 secs"));
   digitalWrite(LED_BUILTIN, HIGH);
@@ -163,7 +155,9 @@ void loop()
   bool firebase_ready = true;
   int cnt = 0;
 
-  digitalWrite(LED_BUILTIN, LOW);
+  if (!led_blink)
+    digitalWrite(LED_BUILTIN, LOW);
+
   ArduinoOTA.handle();
 
   if ((millis() - led_ms) > 1000)
@@ -185,6 +179,8 @@ void loop()
       led_on = !led_on;
       if (led_on)
         digitalWrite(LED_BUILTIN, HIGH);
+      else
+        digitalWrite(LED_BUILTIN, LOW);
     }
     led_ms = millis();
   }
@@ -261,44 +257,20 @@ void loop()
 
     if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
     {
-      Serial.printf("%s: %f, %f\n", utc_timestr, t, h);
+      Serial.printf("%s [%s]: %f, %f\n", utc_timestr, DEVICE, t, h);
     }
     else
     {
-      Serial.println("ERROR adding record...");
+      Serial.println("ERROR adding records");
       Serial.println(fbdo.errorReason());
     }
+    
     // fbdo.clear();
   }
 
 LOOP_DONE:
-  delay(1);
+  delay(5);
 }
-
-// The Firestore payload upload callback function
-// void fcsUploadCallback(CFS_UploadStatusInfo info)
-// {
-//   if (info.status == fb_esp_cfs_upload_status_init)
-//   {
-//     Serial.printf("\nUploading data (%d)...\n", info.size);
-//   }
-//   else if (info.status == fb_esp_cfs_upload_status_upload)
-//   {
-//     Serial.printf("Uploaded %d%s\n", (int)info.progress, "%");
-//   }
-//   else if (info.status == fb_esp_cfs_upload_status_complete)
-//   {
-//     Serial.println("Upload completed ");
-//   }
-//   else if (info.status == fb_esp_cfs_upload_status_process_response)
-//   {
-//     Serial.print("Processing the response... ");
-//   }
-//   else if (info.status == fb_esp_cfs_upload_status_error)
-//   {
-//     Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
-//   }
-// }
 
 static bool create_device_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name)
 {
@@ -309,7 +281,21 @@ static bool create_device_doc(FirebaseData *fbdo, const char *project, char *dev
 
   if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, device_doc_path, content.raw()))
   {
-    return true;
+    String documentPath = device_doc_path;
+    documentPath += "/pixel-phones/_0_";
+    if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
+    {
+      Serial.println("pixel-phones added...");
+      return true;
+    }
+    else
+    {
+      Serial.println("ERROR adding pixel-phones");
+    }
+  }
+  else
+  {
+    Serial.println("ERROR adding new device");
   }
 
   Serial.println(fbdo->errorReason());
