@@ -19,11 +19,15 @@
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (5) //2023-10-12[5]
+#define LAB_THERMOMETER_VERSION (5) //2023-10-16[5]
 
 
 #define DHTTYPE DHT11 // DHT 11
-#define DHTPIN 13     // Digital pin connected to the DHT sensor
+#ifdef ARDUINO_NANO_ESP32
+#define DHTPIN 17     // Digital pin connected to the DHT sensor
+#else
+#define DHTPIN 13
+#endif
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -77,8 +81,10 @@ unsigned long wdt_check_ms = 0;
 void setup()
 {
   int cnt=0;
-  Serial.begin(115200);
+  
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+  Serial.begin(115200);
 
   dht.begin(); // initialize the DHT sensor
   WiFi.mode(WIFI_STA);
