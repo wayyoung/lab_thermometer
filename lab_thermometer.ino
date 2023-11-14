@@ -8,23 +8,23 @@
 #include <addons/TokenHelper.h>
 
 /*
- *  Please update the following settings in "Secret" tab:
- *
- *  SECRET_DEVICE         "YOUR DEVICE NAME"
- *  SECRET_WIFI_SSID      "SSID"
- *  SECRET_WIFI_PASSWORD  "PASSWORD"
- */
+    Please update the following settings in "Secret" tab:
+
+    SECRET_DEVICE         "YOUR DEVICE NAME"
+    SECRET_WIFI_SSID      "SSID"
+    SECRET_WIFI_PASSWORD  "PASSWORD"
+*/
 #define DEVICE SECRET_DEVICE
 
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (5) //2023-10-16[5]
+#define LAB_THERMOMETER_VERSION (6) //2023-11-14
 
 
 #define DHTTYPE DHT11 // DHT 11
 #ifdef ARDUINO_NANO_ESP32
-#define DHTPIN 17     // Digital pin connected to the DHT sensor
+#define DHTPIN 17     // A0, Digital pin connected to the DHT sensor
 #else
 #define DHTPIN 13
 #endif
@@ -80,8 +80,8 @@ unsigned long wdt_check_ms = 0;
 
 void setup()
 {
-  int cnt=0;
-  
+  int cnt = 0;
+
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
   Serial.begin(115200);
@@ -93,9 +93,9 @@ void setup()
   {
     Serial.println("Connection Failed!");
     delay(1000);
-    if(cnt++ > 10)
+    if (cnt++ > 10)
     {
-       Serial.println("REBOOTING...");
+      Serial.println("REBOOTING...");
       ESP.restart();
     }
   }
@@ -118,7 +118,7 @@ void setup()
   //               // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
   //             })
   //     .onEnd([]()
-  //           { in_OTA = false; 
+  //           { in_OTA = false;
   //             Serial.println("\nEnd"); })
   //     .onProgress([](unsigned int progress, unsigned int total)
   //                 { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
@@ -204,7 +204,7 @@ void loop()
 
   if ((millis() - main_loop_ms) > MAIN_LOOP_DELAY)
   {
-    if (!Firebase.ready())
+    if (!firebase_ready)
     {
       digitalWrite(LED_BUILTIN, HIGH);
       delay(200);
@@ -213,7 +213,6 @@ void loop()
       digitalWrite(LED_BUILTIN, HIGH);
       delay(200);
       digitalWrite(LED_BUILTIN, LOW);
-      firebase_ready = false;
       Serial.printf("ERROR Firebase not ready,millis=%ld\r\n", millis());
       if (wdt_check_ms > 0 && (millis() - wdt_check_ms) > WDT_OFFLINE_DELAY)
       {
@@ -223,6 +222,7 @@ void loop()
       }
       Firebase.reconnectWiFi(true);
       fbdo.keepAlive(5, 5, 1);
+      firebase_ready = Firebase.ready();
     }
     else
     {
@@ -245,13 +245,6 @@ void loop()
   }
   sample_ms = millis();
 
-  // Read humidity
-  h = (double)dht.readHumidity();
-  if (isnan(h))
-  {
-    h = -99;
-    Serial.println("ERROR reading DHT h");
-  }
 
   // Read temperature as Celsius (the default)
   t = (double)dht.readTemperature();
@@ -280,6 +273,7 @@ void loop()
   Serial.println(t);
 
   // check again
+  firebase_ready = Firebase.ready();
   if (firebase_ready)
   {
 
@@ -296,7 +290,7 @@ void loop()
         goto LOOP_DONE;
       }
     }
-    
+
     if (version != LAB_THERMOMETER_VERSION)
     {
       int ver = th_version(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
@@ -305,14 +299,14 @@ void loop()
         //update the version
         FirebaseJson content;
         content.set("fields/"VERSION"/integerValue", LAB_THERMOMETER_VERSION);
-        Serial.printf("Updating version: %d \n",LAB_THERMOMETER_VERSION);
+        Serial.printf("Updating version: %d \n", LAB_THERMOMETER_VERSION);
 
         /** if updateMask contains the field name that exists in the remote document and
-         * this field name does not exist in the document (content), that field will be deleted from remote document
-         */
+           this field name does not exist in the document (content), that field will be deleted from remote document
+        */
 
         Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, DEVICE_DOC_PATH, content.raw(), ""VERSION /* updateMask */);
-  
+
       }
       else
       {
@@ -321,75 +315,76 @@ void loop()
     }
 
     led_blink = led_blink_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    Serial.printf("led_blink: %d\n", led_blink);  
+    Serial.printf("led_blink: %d\n", led_blink);
     fault_record = th_fault_record_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    Serial.printf("fault_record: %d\n", fault_record);  
+    Serial.printf("fault_record: %d\n", fault_record);
     bool s = th_suspended(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
     if (suspended != s)
     {
       suspended = s;
-      Serial.printf("suspended changed: %d\n", suspended);  
+      Serial.printf("suspended changed: %d\n", suspended);
     }
     Serial.printf("s: %d\n", s);
-    
+
     // don't want to enable this now
     // disable_delta = th_disable_delta(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    
+
     int p = th_sample_period(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
     if (p != -1 && p != sample_period)
     {
       sample_period = p;
-      Serial.printf("sample_period changed: %d\n", sample_period);  
+      Serial.printf("sample_period changed: %d\n", sample_period);
     }
-    Serial.printf("p: %d\n", p);  
+    Serial.printf("p: %d\n", p);
 
     // Serial.printf("led_blink: %d\n", led_blink);
-    
+
     if (suspended)
     {
       Serial.println("skip uploading due to suspended");
       goto LOOP_DONE;
     }
-    
-    
-    if (fault_record || t!=-99)
+
+
+    if (fault_record || t != -99)
     {
       if ((!disable_delta) && ((millis() - upload_ms) < DELTA_UPLOAD_PERIOD))
       {
         double t_delta = abs( t - t_uploaded);
-        if (t_delta <1)
+        if (t_delta < 1)
         {
           goto LOOP_DONE;
         }
       }
-      
+
       t_uploaded = t;
       upload_ms = millis();
-  
-      
+
+
       // For the usage of FirebaseJson, see examples/FirebaseJson/BasicUsage/Create_Edit_Parse/Create_Edit_Parse.ino
       FirebaseJson content;
-  
+
       content.set("fields/temperature/doubleValue", t);
-      content.set("fields/humidity/doubleValue", h);
+      // content.set("fields/humidity/doubleValue", h);
       content.set("fields/sample_timestamp/timestampValue", utc_timestr);
-  
+
       String documentPath = DEVICE_DOC_PATH;
       documentPath += "/records/";
       documentPath += utc_timestr;
-  
+
       if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
       {
-        Serial.printf("%s [%s]: %f, %f\r\n", utc_timestr, DEVICE, t, h);
+        Serial.printf("%s [%s]: %f\r\n", utc_timestr, DEVICE, t);
       }
       else
       {
-        Serial.println("ERROR adding records");
+        Serial.println("ERROR adding records!!");
         Serial.println(fbdo.errorReason());
+        firebase_ready = false;
       }
     }
-    
-    // fbdo.clear();
+
+    fbdo.clear();
   }
 
 LOOP_DONE:
@@ -435,7 +430,7 @@ static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char *dev
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
@@ -455,9 +450,9 @@ static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, cha
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
-  
+
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
       if (payload.get(jsonData, "fields/" FAULT_RECORD "/booleanValue", false) && jsonData.boolValue == true)
@@ -476,7 +471,7 @@ static bool th_suspended(FirebaseData *fbdo, char const *project, char *device_d
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
 
       // Get the data from FirebaseJson object
@@ -497,7 +492,7 @@ static bool th_disable_delta(FirebaseData *fbdo, char const *project, char *devi
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
 
       // Get the data from FirebaseJson object
@@ -518,7 +513,7 @@ static int th_sample_period(FirebaseData *fbdo, char const *project, char *devic
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
@@ -539,7 +534,7 @@ static int th_version(FirebaseData *fbdo, char const *project, char *device_doc_
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if(payload.setJsonData(fbdo->payload().c_str()))
+    if (payload.setJsonData(fbdo->payload().c_str()))
     {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
