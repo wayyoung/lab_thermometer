@@ -19,7 +19,7 @@
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (6) //2023-11-14
+#define LAB_THERMOMETER_VERSION (7) //2023-11-16
 
 
 #define DHTTYPE DHT11 // DHT 11
@@ -74,6 +74,7 @@ static bool led_blink_enabled(FirebaseData *fbdo, const char *project, char *dev
 static int th_sample_period(FirebaseData *fbdo, char const *project, char *device_doc_path);
 static bool th_suspended(FirebaseData *fbdo, char const *project, char *device_doc_path);
 static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, char *device_doc_path);
+static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name, char *utc_timestr);
 
 bool in_OTA = false;
 unsigned long wdt_check_ms = 0;
@@ -281,6 +282,7 @@ void loop()
     {
       if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", DEVICE_DOC_PATH, "") || create_device_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, DEVICE))
       {
+        create_positions_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, "--", utc_timestr);
         Serial.println("device_doc: " DEVICE);
         device_doc_exist = true;
       }
@@ -306,6 +308,7 @@ void loop()
         */
 
         Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, DEVICE_DOC_PATH, content.raw(), ""VERSION /* updateMask */);
+        create_positions_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, "--", utc_timestr);
 
       }
       else
@@ -417,6 +420,31 @@ static bool create_device_doc(FirebaseData *fbdo, const char *project, char *dev
   else
   {
     Serial.println("ERROR adding new device");
+  }
+
+  Serial.println(fbdo->errorReason());
+  return false;
+}
+
+static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name, char *utc_timestr)
+{
+  // For the usage of FirebaseJson, see examples/FirebaseJson/BasicUsage/Create_Edit_Parse/Create_Edit_Parse.ino
+  FirebaseJson content;
+
+  content.set("fields/name/stringValue", name);
+  content.set("fields/setup_timestamp/timestampValue", utc_timestr);
+  String documentPath = device_doc_path;
+  documentPath += "/positions/";
+  documentPath += utc_timestr;
+
+  if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
+  {
+    Serial.println("position added...");
+    return true;
+  }
+  else
+  {
+    Serial.println("ERROR adding new position");
   }
 
   Serial.println(fbdo->errorReason());
