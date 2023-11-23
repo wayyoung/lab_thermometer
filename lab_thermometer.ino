@@ -2,10 +2,13 @@
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 // #include <ArduinoOTA.h>
-#include "DHT.h"
+// #include "DHT.h"
 #include "time.h"
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
 
 /*
     Please update the following settings in "Secret" tab:
@@ -19,7 +22,7 @@
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (7) //2023-11-16
+#define LAB_THERMOMETER_VERSION (8) //2023-11-23
 
 
 #define DHTTYPE DHT11 // DHT 11
@@ -29,7 +32,12 @@
 #define DHTPIN 13
 #endif
 
-DHT dht(DHTPIN, DHTTYPE);
+
+// DHT dht(DHTPIN, DHTTYPE);
+
+OneWire oneWire(DHTPIN);         // setup a oneWire instance
+DallasTemperature datempSensor(&oneWire); // pass oneWire to DallasTemperature library
+
 
 #define NTP_SERVER "pool.ntp.org"
 
@@ -87,7 +95,8 @@ void setup()
   digitalWrite(LED_BUILTIN, LOW);
   Serial.begin(115200);
 
-  dht.begin(); // initialize the DHT sensor
+  // dht.begin(); // initialize the DHT sensor
+  datempSensor.begin();
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.waitForConnectResult() != WL_CONNECTED)
@@ -104,36 +113,6 @@ void setup()
   Serial.println(WiFi.localIP());
   Serial.print("\nDefault MAC Address: ");
   Serial.println(WiFi.macAddress());
-
-  // ArduinoOTA
-  //     .onStart([]()
-  //             {
-  //               String type;
-  //               if (ArduinoOTA.getCommand() == U_FLASH)
-  //                 Serial.println("Start updating sketch");
-  //               else // U_SPIFFS
-  //                 Serial.println("Start updating filesystem");
-
-  //               in_OTA = true;
-
-  //               // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-  //             })
-  //     .onEnd([]()
-  //           { in_OTA = false;
-  //             Serial.println("\nEnd"); })
-  //     .onProgress([](unsigned int progress, unsigned int total)
-  //                 { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
-  //     .onError([](ota_error_t error)
-  //             {
-  //   Serial.printf("Error[%u]: ", error);
-  //   if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-  //   else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-  //   else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-  //   else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-  //   else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
-
-  // ArduinoOTA.setHostname(DEVICE);
-  // ArduinoOTA.setPassword(SECRET_OTA_PASSWORD);
 
   Serial.println("Turn on LED for 5 secs then turn off 3 secs");
   digitalWrite(LED_BUILTIN, HIGH);
@@ -246,13 +225,18 @@ void loop()
   }
   sample_ms = millis();
 
-
-  // Read temperature as Celsius (the default)
-  t = (double)dht.readTemperature();
-  if (isnan(t))
+  datempSensor.requestTemperatures();             // send the command to get temperatures
+  t = datempSensor.getTempCByIndex(0);  // read temperature in Celsius
+  if (t <= -100)
   {
-    t = -99;
-    Serial.println("ERROR reading DHT t");
+    Serial.println("ERROR reading DALLAS t");
+    // Read temperature as Celsius (the default)
+    // t = (double)dht.readTemperature();
+    // if (isnan(t))
+    // {
+    //   t = -99;
+    //   Serial.println("ERROR reading DHT t");
+    // }
   }
 
   while (!getLocalTime(&timeinfo))
