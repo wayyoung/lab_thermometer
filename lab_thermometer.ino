@@ -3,7 +3,7 @@
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
 #else
-#include <Wifi.h>
+#include <WiFi.h>
 #endif
 // #include <ESPmDNS.h>
 #include <WiFiUdp.h>
