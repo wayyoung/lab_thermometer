@@ -1,5 +1,11 @@
-#include <WiFi.h>
-#include <ESPmDNS.h>
+#include "arduino_secrets.h"
+
+#if defined(ESP8266)
+#include <ESP8266WiFi.h>
+#else
+#include <Wifi.h>
+#endif
+// #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 // #include <ArduinoOTA.h>
 // #include "DHT.h"
@@ -8,6 +14,19 @@
 #include <addons/TokenHelper.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+
+#include <U8g2lib.h>
+
+#ifdef U8X8_HAVE_HW_SPI
+#include <SPI.h>
+#endif
+#ifdef U8X8_HAVE_HW_I2C
+#include <Wire.h>
+#endif
+
+//U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/ D2, /* data=*/ D1, /* reset=*/ U8X8_PIN_NONE);  //NodeOLED用這行，或部份NodeMCU系列的板子也用這行
+U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/D2, /* data=*/D1, /* reset=*/U8X8_PIN_NONE);  //ESP8266板子搭配SSD1306用這行
+
 
 
 /*
@@ -22,12 +41,11 @@
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (8) //2023-11-23
+#define LAB_THERMOMETER_VERSION (10)  //
 
-
-#define DHTTYPE DHT11 // DHT 11
+#define DHTTYPE DHT11  // DHT 11
 #ifdef ARDUINO_NANO_ESP32
-#define DHTPIN 17     // A0, Digital pin connected to the DHT sensor
+#define DHTPIN 17  // A0, Digital pin connected to the DHT sensor
 #else
 #define DHTPIN 13
 #endif
@@ -35,8 +53,8 @@
 
 // DHT dht(DHTPIN, DHTTYPE);
 
-OneWire oneWire(DHTPIN);         // setup a oneWire instance
-DallasTemperature datempSensor(&oneWire); // pass oneWire to DallasTemperature library
+OneWire oneWire(DHTPIN);                   // setup a oneWire instance
+DallasTemperature datempSensor(&oneWire);  // pass oneWire to DallasTemperature library
 
 
 #define NTP_SERVER "pool.ntp.org"
@@ -60,10 +78,10 @@ DallasTemperature datempSensor(&oneWire); // pass oneWire to DallasTemperature l
 #define DISABLE_DELTA "disable_delta"
 #define VERSION "version"
 
-#define MAIN_LOOP_DELAY   1000 // msec
-#define DEFAULT_SAMPLE_PERIOD      10000 // msec
-#define WDT_OFFLINE_DELAY 1800000 // msec
-#define DELTA_UPLOAD_PERIOD 180000 //msec
+#define MAIN_LOOP_DELAY 1000         // msec
+#define DEFAULT_SAMPLE_PERIOD 10000  // msec
+#define WDT_OFFLINE_DELAY 1800000    // msec
+#define DELTA_UPLOAD_PERIOD 180000   //msec
 
 // Define Firebase Data object
 FirebaseData fbdo;
@@ -78,47 +96,58 @@ FirebaseConfig config;
 static bool create_device_doc(FirebaseData *fbdo, char const *project, char *device_doc_path, char *name);
 static bool add_record(FirebaseData *fbdo, const char *project, char *device_doc_path, char *utc_timestr, double t, double h);
 
-static bool led_blink_enabled(FirebaseData *fbdo, const char *project, char *device_doc_path);
-static int th_sample_period(FirebaseData *fbdo, char const *project, char *device_doc_path);
-static bool th_suspended(FirebaseData *fbdo, char const *project, char *device_doc_path);
-static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, char *device_doc_path);
-static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name, char *utc_timestr);
+static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char const *device_doc_path);
+static int th_sample_period(FirebaseData *fbdo, char const *project, char const *device_doc_path);
+static bool th_suspended(FirebaseData *fbdo, char const *project, char const *device_doc_path);
+static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, char const *device_doc_path);
+static bool create_positions_doc(FirebaseData *fbdo, const char *project, char const *device_doc_path, char const *name, char const *utc_timestr);
 
 bool in_OTA = false;
+bool ip_ready = false;
 unsigned long wdt_check_ms = 0;
 
-void setup()
-{
+static void lcd_in_main_loop(char const *timestr);
+
+#if defined(ESP8266)
+#define ON LOW
+#define OFF HIGH
+#else
+#define ON HIGH
+#define OFF LOW
+#endif
+
+void setup() {
   int cnt = 0;
 
   pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED_BUILTIN, OFF);
   Serial.begin(115200);
+  u8g2.begin();
+  lcd_in_main_loop(NULL);
 
   // dht.begin(); // initialize the DHT sensor
   datempSensor.begin();
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED)
-  {
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed!");
     delay(1000);
-    if (cnt++ > 10)
-    {
+    if (cnt++ > 10) {
       Serial.println("REBOOTING...");
       ESP.restart();
     }
   }
-  Serial.println("Connected to WiFi network with IP Address:");
+  Serial.println("\nConnected to WiFi network with IP Address:");
   Serial.println(WiFi.localIP());
   Serial.print("\nDefault MAC Address: ");
   Serial.println(WiFi.macAddress());
+  ip_ready = true;
 
   Serial.println("Turn on LED for 5 secs then turn off 3 secs");
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(5000);
-  digitalWrite(LED_BUILTIN, LOW); // turn the LED on (HIGH is the voltage level)
-  delay(3000);
+  digitalWrite(LED_BUILTIN, ON);
+  delay(1000);
+  // digitalWrite(LED_BUILTIN, LOW);  // turn the LED on (HIGH is the voltage level)
+  // delay(1000);
 
   configTime(0, 0, NTP_SERVER);
 
@@ -133,7 +162,7 @@ void setup()
   auth.user.password = USER_PASSWORD;
 
   /* Assign the callback function for the long running token generation task */
-  config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
+  config.token_status_callback = tokenStatusCallback;  // see addons/TokenHelper.h
 
   // Limit the size of response payload to be collected in FirebaseData
   fbdo.setResponseSize(4096);
@@ -168,67 +197,74 @@ int version = -1;
 
 double t_uploaded = -1;
 
-void loop()
-{
+double t = -99;
+bool firebase_ready = true;
+void loop() {
   struct tm timeinfo;
   double h;
-  double t;
+
   char utc_timestr[30];
-  bool firebase_ready = true;
+
   int cnt = 0;
 
   if (!led_blink)
-    digitalWrite(LED_BUILTIN, LOW);
+    digitalWrite(LED_BUILTIN, OFF);
 
   // ArduinoOTA.handle();
 
-  if ((millis() - main_loop_ms) > MAIN_LOOP_DELAY)
-  {
-    if (!firebase_ready)
-    {
-      digitalWrite(LED_BUILTIN, HIGH);
+  if ((millis() - main_loop_ms) > MAIN_LOOP_DELAY) {
+    if (!firebase_ready) {
+      digitalWrite(LED_BUILTIN, ON);
       delay(200);
-      digitalWrite(LED_BUILTIN, LOW);
+      digitalWrite(LED_BUILTIN, OFF);
       delay(100);
-      digitalWrite(LED_BUILTIN, HIGH);
+      digitalWrite(LED_BUILTIN, ON);
       delay(200);
-      digitalWrite(LED_BUILTIN, LOW);
+      digitalWrite(LED_BUILTIN, OFF);
       Serial.printf("ERROR Firebase not ready,millis=%ld\r\n", millis());
-      if (wdt_check_ms > 0 && (millis() - wdt_check_ms) > WDT_OFFLINE_DELAY)
-      {
+      if (wdt_check_ms > 0 && (millis() - wdt_check_ms) > WDT_OFFLINE_DELAY) {
         Serial.println("OFFLINE_WDT !! REBOOTING...");
-        delay(3000); //to printout
+        delay(3000);  //to printout
         ESP.restart();
       }
       Firebase.reconnectWiFi(true);
       fbdo.keepAlive(5, 5, 1);
       firebase_ready = Firebase.ready();
-    }
-    else
-    {
+    } else {
       wdt_check_ms = millis();
-      if (led_blink)
-      {
+      if (led_blink) {
         led_on = !led_on;
         if (led_on)
-          digitalWrite(LED_BUILTIN, HIGH);
+          digitalWrite(LED_BUILTIN, ON);
         else
-          digitalWrite(LED_BUILTIN, LOW);
+          digitalWrite(LED_BUILTIN, OFF);
       }
     }
     main_loop_ms = millis();
   }
 
-  if (in_OTA || (millis() - sample_ms) < sample_period)
-  {
+  while (!getLocalTime(&timeinfo)) {
+    if (++cnt < 3) {
+      delay(500);
+      continue;
+    }
+
+    Serial.println("ERROR obtaining time");
+    goto LOOP_DONE;
+  }
+  memset(utc_timestr, 0, sizeof(utc_timestr));
+  strftime(utc_timestr, 22, "%FT%TZ", &timeinfo);
+
+  lcd_in_main_loop(utc_timestr);
+
+  if (in_OTA || (millis() - sample_ms) < sample_period) {
     goto LOOP_DONE;
   }
   sample_ms = millis();
 
-  datempSensor.requestTemperatures();             // send the command to get temperatures
+  datempSensor.requestTemperatures();   // send the command to get temperatures
   t = datempSensor.getTempCByIndex(0);  // read temperature in Celsius
-  if (t <= -100)
-  {
+  if (t <= -20) {
     Serial.println("ERROR reading DALLAS t");
     // Read temperature as Celsius (the default)
     // t = (double)dht.readTemperature();
@@ -239,19 +275,7 @@ void loop()
     // }
   }
 
-  while (!getLocalTime(&timeinfo))
-  {
-    if (++cnt < 3)
-    {
-      delay(500);
-      continue;
-    }
 
-    Serial.println("ERROR obtaining time");
-    goto LOOP_DONE;
-  }
-  memset(utc_timestr, 0, sizeof(utc_timestr));
-  strftime(utc_timestr, 22, "%FT%TZ", &timeinfo);
   Serial.print(" record: ");
   Serial.println(utc_timestr);
   Serial.print(" t: ");
@@ -259,44 +283,35 @@ void loop()
 
   // check again
   firebase_ready = Firebase.ready();
-  if (firebase_ready)
-  {
+  if (firebase_ready) {
 
-    if (!device_doc_exist)
-    {
-      if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", DEVICE_DOC_PATH, "") || create_device_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, DEVICE))
-      {
+    if (!device_doc_exist) {
+      if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", DEVICE_DOC_PATH, "") || create_device_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, DEVICE)) {
         create_positions_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, "--", utc_timestr);
         Serial.println("device_doc: " DEVICE);
         device_doc_exist = true;
-      }
-      else
-      {
+      } else {
         Serial.println("ERROR to get device_doc: " DEVICE);
         goto LOOP_DONE;
       }
     }
 
-    if (version != LAB_THERMOMETER_VERSION)
-    {
+    if (version != LAB_THERMOMETER_VERSION) {
       int ver = th_version(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-      if (ver != LAB_THERMOMETER_VERSION)
-      {
+      if (ver != LAB_THERMOMETER_VERSION) {
         //update the version
         FirebaseJson content;
-        content.set("fields/"VERSION"/integerValue", LAB_THERMOMETER_VERSION);
+        content.set("fields/" VERSION "/integerValue", LAB_THERMOMETER_VERSION);
         Serial.printf("Updating version: %d \n", LAB_THERMOMETER_VERSION);
 
         /** if updateMask contains the field name that exists in the remote document and
            this field name does not exist in the document (content), that field will be deleted from remote document
         */
 
-        Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, DEVICE_DOC_PATH, content.raw(), ""VERSION /* updateMask */);
+        Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, DEVICE_DOC_PATH, content.raw(), "" VERSION /* updateMask */);
         create_positions_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, "--", utc_timestr);
 
-      }
-      else
-      {
+      } else {
         version = LAB_THERMOMETER_VERSION;
       }
     }
@@ -306,8 +321,7 @@ void loop()
     fault_record = th_fault_record_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
     Serial.printf("fault_record: %d\n", fault_record);
     bool s = th_suspended(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    if (suspended != s)
-    {
+    if (suspended != s) {
       suspended = s;
       Serial.printf("suspended changed: %d\n", suspended);
     }
@@ -317,8 +331,7 @@ void loop()
     // disable_delta = th_disable_delta(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
 
     int p = th_sample_period(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    if (p != -1 && p != sample_period)
-    {
+    if (p != -1 && p != sample_period) {
       sample_period = p;
       Serial.printf("sample_period changed: %d\n", sample_period);
     }
@@ -326,20 +339,16 @@ void loop()
 
     // Serial.printf("led_blink: %d\n", led_blink);
 
-    if (suspended)
-    {
+    if (suspended) {
       Serial.println("skip uploading due to suspended");
       goto LOOP_DONE;
     }
 
 
-    if (fault_record || t != -99)
-    {
-      if ((!disable_delta) && ((millis() - upload_ms) < DELTA_UPLOAD_PERIOD))
-      {
-        double t_delta = abs( t - t_uploaded);
-        if (t_delta < 1)
-        {
+    if (fault_record || t >= -20) {
+      if ((!disable_delta) && ((millis() - upload_ms) < DELTA_UPLOAD_PERIOD)) {
+        double t_delta = abs(t - t_uploaded);
+        if (t_delta < 1) {
           goto LOOP_DONE;
         }
       }
@@ -359,12 +368,9 @@ void loop()
       documentPath += "/records/";
       documentPath += utc_timestr;
 
-      if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
-      {
+      if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, documentPath, content.raw())) {
         Serial.printf("%s [%s]: %f\r\n", utc_timestr, DEVICE, t);
-      }
-      else
-      {
+      } else {
         Serial.println("ERROR adding records!!");
         Serial.println(fbdo.errorReason());
         firebase_ready = false;
@@ -378,8 +384,7 @@ LOOP_DONE:
   delay(1);
 }
 
-static bool create_device_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name)
-{
+static bool create_device_doc(FirebaseData *fbdo, char const *project, char const *device_doc_path, char const *name) {
   // For the usage of FirebaseJson, see examples/FirebaseJson/BasicUsage/Create_Edit_Parse/Create_Edit_Parse.ino
   FirebaseJson content;
 
@@ -387,22 +392,16 @@ static bool create_device_doc(FirebaseData *fbdo, const char *project, char *dev
   content.set("fields/location/stringValue", "--");
   content.set("fields/description/stringValue", "--");
 
-  if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, device_doc_path, content.raw()))
-  {
+  if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, device_doc_path, content.raw())) {
     String documentPath = device_doc_path;
     documentPath += "/pixel-phones/_0_";
-    if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
-    {
+    if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw())) {
       Serial.println("pixel-phones added...");
       return true;
-    }
-    else
-    {
+    } else {
       Serial.println("ERROR adding pixel-phones");
     }
-  }
-  else
-  {
+  } else {
     Serial.println("ERROR adding new device");
   }
 
@@ -410,8 +409,7 @@ static bool create_device_doc(FirebaseData *fbdo, const char *project, char *dev
   return false;
 }
 
-static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *device_doc_path, char *name, char *utc_timestr)
-{
+static bool create_positions_doc(FirebaseData *fbdo, const char *project, char const *device_doc_path, char const *name, char const *utc_timestr) {
   // For the usage of FirebaseJson, see examples/FirebaseJson/BasicUsage/Create_Edit_Parse/Create_Edit_Parse.ino
   FirebaseJson content;
 
@@ -421,13 +419,10 @@ static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *
   documentPath += "/positions/";
   documentPath += utc_timestr;
 
-  if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw()))
-  {
+  if (Firebase.Firestore.createDocument(fbdo, project, "" /* databaseId can be (default) or empty */, documentPath, content.raw())) {
     Serial.println("position added...");
     return true;
-  }
-  else
-  {
+  } else {
     Serial.println("ERROR adding new position");
   }
 
@@ -435,19 +430,15 @@ static bool create_positions_doc(FirebaseData *fbdo, const char *project, char *
   return false;
 }
 
-static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, LED_BLINK))
-  {
+static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, LED_BLINK)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" LED_BLINK "/booleanValue", false) && jsonData.boolValue == true)
-      {
+      if (payload.get(jsonData, "fields/" LED_BLINK "/booleanValue", false) && jsonData.boolValue == true) {
         return true;
       }
     }
@@ -455,20 +446,16 @@ static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char *dev
   return false;
 }
 
-static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, FAULT_RECORD))
-  {
+static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, FAULT_RECORD)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
 
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" FAULT_RECORD "/booleanValue", false) && jsonData.boolValue == true)
-      {
+      if (payload.get(jsonData, "fields/" FAULT_RECORD "/booleanValue", false) && jsonData.boolValue == true) {
         return true;
       }
     }
@@ -476,20 +463,16 @@ static bool th_fault_record_enabled(FirebaseData *fbdo, char const *project, cha
   return false;
 }
 
-static bool th_suspended(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, SUSPENDED))
-  {
+static bool th_suspended(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, SUSPENDED)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
 
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" SUSPENDED "/booleanValue", false) && jsonData.boolValue == true)
-      {
+      if (payload.get(jsonData, "fields/" SUSPENDED "/booleanValue", false) && jsonData.boolValue == true) {
         return true;
       }
     }
@@ -497,20 +480,16 @@ static bool th_suspended(FirebaseData *fbdo, char const *project, char *device_d
   return false;
 }
 
-static bool th_disable_delta(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, DISABLE_DELTA))
-  {
+static bool th_disable_delta(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, DISABLE_DELTA)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
 
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" DISABLE_DELTA "/booleanValue", false) && jsonData.boolValue == true)
-      {
+      if (payload.get(jsonData, "fields/" DISABLE_DELTA "/booleanValue", false) && jsonData.boolValue == true) {
         return true;
       }
     }
@@ -518,19 +497,15 @@ static bool th_disable_delta(FirebaseData *fbdo, char const *project, char *devi
   return false;
 }
 
-static int th_sample_period(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, SAMPLE_PERIOD))
-  {
+static int th_sample_period(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, SAMPLE_PERIOD)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" SAMPLE_PERIOD "/integerValue", false))
-      {
+      if (payload.get(jsonData, "fields/" SAMPLE_PERIOD "/integerValue", false)) {
         int period = jsonData.intValue;
         return period * 1000;
       }
@@ -539,23 +514,43 @@ static int th_sample_period(FirebaseData *fbdo, char const *project, char *devic
   return -1;
 }
 
-static int th_version(FirebaseData *fbdo, char const *project, char *device_doc_path)
-{
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, VERSION))
-  {
+static int th_version(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
+  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, VERSION)) {
 
     // Create a FirebaseJson object and set content with received payload
     FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str()))
-    {
+    if (payload.setJsonData(fbdo->payload().c_str())) {
       // Get the data from FirebaseJson object
       FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" VERSION "/integerValue", false))
-      {
+      if (payload.get(jsonData, "fields/" VERSION "/integerValue", false)) {
         int version = jsonData.intValue;
         return version;
       }
     }
   }
   return -1;
+}
+
+static int xoff = 0;
+static void lcd_in_main_loop(char const *timestr) {
+  String ip_string = (ip_ready) ? WiFi.localIP().toString() : String("0.0.0.0");
+  String fready_string = String("firebase_ready: ");
+  fready_string.concat(String(firebase_ready));
+  String t_string = String("T: ");
+  t_string.concat(String(t));
+
+
+
+  u8g2.setFont(u8g2_font_squeezed_b7_tr);
+  u8g2.firstPage();
+  do {
+
+    u8g2.drawStr(0, 8, DEVICE);
+    u8g2.drawStr(xoff, 18, ip_string.c_str());
+    u8g2.drawStr(xoff, 28, fready_string.c_str());
+    u8g2.drawStr(xoff, 38, t_string.c_str());
+    if (timestr != NULL)
+      u8g2.drawStr(0, 62, timestr);
+  } while (u8g2.nextPage());
+  xoff = (xoff + 1) % 128;
 }
