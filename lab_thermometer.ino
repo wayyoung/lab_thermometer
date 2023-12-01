@@ -1,20 +1,20 @@
-#include "arduino_secrets.h"
-
-#if defined(ESP8266)
-#include <ESP8266WiFi.h>
-#else
 #include <WiFi.h>
-#endif
-// #include <ESPmDNS.h>
 #include <WiFiUdp.h>
-// #include <ArduinoOTA.h>
-// #include "DHT.h"
 #include "time.h"
 #include <Firebase_ESP_Client.h>
 #include <addons/TokenHelper.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+
+#ifdef ARDUINO_NANO_ESP32
+#define DHTPIN 1  // A0, Digital pin connected to the DHT sensor
+#define VC_PIN 18
+#define LED_PIN LED_BUILTIN
+#else
+#define DHTPIN 13
+#define VC_PIN 12
+#define LED_PIN 16
 #include <U8g2lib.h>
 
 #ifdef U8X8_HAVE_HW_SPI
@@ -23,10 +23,8 @@
 #ifdef U8X8_HAVE_HW_I2C
 #include <Wire.h>
 #endif
-
-//U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/ D2, /* data=*/ D1, /* reset=*/ U8X8_PIN_NONE);  //NodeOLED用這行，或部份NodeMCU系列的板子也用這行
-U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/D2, /* data=*/D1, /* reset=*/U8X8_PIN_NONE);  //ESP8266板子搭配SSD1306用這行
-
+U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE, 4, 5);
+#endif
 
 
 /*
@@ -43,12 +41,6 @@ U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/D2, /* data=*/D1, /
 
 #define LAB_THERMOMETER_VERSION (10)  //
 
-#define DHTTYPE DHT11  // DHT 11
-#ifdef ARDUINO_NANO_ESP32
-#define DHTPIN 17  // A0, Digital pin connected to the DHT sensor
-#else
-#define DHTPIN 13
-#endif
 
 
 // DHT dht(DHTPIN, DHTTYPE);
@@ -119,10 +111,14 @@ static void lcd_in_main_loop(char const *timestr);
 void setup() {
   int cnt = 0;
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, OFF);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, OFF);
   Serial.begin(115200);
+  pinMode(VC_PIN, OUTPUT);
+  digitalWrite(VC_PIN, ON);
+#ifndef ARDUINO_NANO_ESP32
   u8g2.begin();
+#endif
   lcd_in_main_loop(NULL);
 
   // dht.begin(); // initialize the DHT sensor
@@ -143,11 +139,14 @@ void setup() {
   Serial.println(WiFi.macAddress());
   ip_ready = true;
 
-  Serial.println("Turn on LED for 5 secs then turn off 3 secs");
-  digitalWrite(LED_BUILTIN, ON);
+#ifdef ARDUINO_NANO_ESP32
+  Serial.println("Turn on LED for 3 secs then turn off 1 secs");
+  digitalWrite(LED_PIN, ON);
+  delay(3000);
+  digitalWrite(LED_PIN, LOW);  // turn the LED on (HIGH is the voltage level)
   delay(1000);
-  // digitalWrite(LED_BUILTIN, LOW);  // turn the LED on (HIGH is the voltage level)
-  // delay(1000);
+#else
+#endif
 
   configTime(0, 0, NTP_SERVER);
 
@@ -208,19 +207,19 @@ void loop() {
   int cnt = 0;
 
   if (!led_blink)
-    digitalWrite(LED_BUILTIN, OFF);
+    digitalWrite(LED_PIN, OFF);
 
   // ArduinoOTA.handle();
 
   if ((millis() - main_loop_ms) > MAIN_LOOP_DELAY) {
     if (!firebase_ready) {
-      digitalWrite(LED_BUILTIN, ON);
+      digitalWrite(LED_PIN, ON);
       delay(200);
-      digitalWrite(LED_BUILTIN, OFF);
+      digitalWrite(LED_PIN, OFF);
       delay(100);
-      digitalWrite(LED_BUILTIN, ON);
+      digitalWrite(LED_PIN, ON);
       delay(200);
-      digitalWrite(LED_BUILTIN, OFF);
+      digitalWrite(LED_PIN, OFF);
       Serial.printf("ERROR Firebase not ready,millis=%ld\r\n", millis());
       if (wdt_check_ms > 0 && (millis() - wdt_check_ms) > WDT_OFFLINE_DELAY) {
         Serial.println("OFFLINE_WDT !! REBOOTING...");
@@ -235,9 +234,9 @@ void loop() {
       if (led_blink) {
         led_on = !led_on;
         if (led_on)
-          digitalWrite(LED_BUILTIN, ON);
+          digitalWrite(LED_PIN, ON);
         else
-          digitalWrite(LED_BUILTIN, OFF);
+          digitalWrite(LED_PIN, OFF);
       }
     }
     main_loop_ms = millis();
@@ -533,6 +532,7 @@ static int th_version(FirebaseData *fbdo, char const *project, char const *devic
 
 static int xoff = 0;
 static void lcd_in_main_loop(char const *timestr) {
+#ifndef ARDUINO_NANO_ESP32
   String ip_string = (ip_ready) ? WiFi.localIP().toString() : String("0.0.0.0");
   String fready_string = String("firebase_ready: ");
   fready_string.concat(String(firebase_ready));
@@ -553,4 +553,5 @@ static void lcd_in_main_loop(char const *timestr) {
       u8g2.drawStr(0, 62, timestr);
   } while (u8g2.nextPage());
   xoff = (xoff + 1) % 128;
+#endif
 }
