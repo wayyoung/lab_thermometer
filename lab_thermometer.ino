@@ -39,7 +39,7 @@ U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE, 4, 5
 #define WIFI_SSID SECRET_WIFI_SSID
 #define WIFI_PASSWORD SECRET_WIFI_PASSWORD
 
-#define LAB_THERMOMETER_VERSION (12)  //
+#define LAB_THERMOMETER_VERSION (15)  //
 
 
 
@@ -98,7 +98,7 @@ bool in_OTA = false;
 bool ip_ready = false;
 unsigned long wdt_check_ms = 0;
 
-static void lcd_in_main_loop(char const *timestr);
+static void lcd_in_main_loop(char const *timestr, int freemem);
 
 #if defined(ESP8266)
 #define ON LOW
@@ -119,7 +119,7 @@ void setup() {
 #ifndef ARDUINO_NANO_ESP32
   u8g2.begin();
 #endif
-  lcd_in_main_loop(NULL);
+  lcd_in_main_loop(NULL, 0);
 
   // dht.begin(); // initialize the DHT sensor
   datempSensor.begin();
@@ -205,6 +205,7 @@ void loop() {
   char utc_timestr[30];
 
   int cnt = 0;
+  int freemem = heap_caps_get_free_size(MALLOC_CAP_8BIT);
 
   if (!led_blink)
     digitalWrite(LED_PIN, OFF);
@@ -220,7 +221,7 @@ void loop() {
       digitalWrite(LED_PIN, ON);
       delay(200);
       digitalWrite(LED_PIN, OFF);
-      Serial.printf("ERROR Firebase not ready,millis=%ld\r\n", millis());
+      Serial.printf("ERROR Firebase not ready,millis=%ld\n", millis());
       if (wdt_check_ms > 0 && (millis() - wdt_check_ms) > WDT_OFFLINE_DELAY) {
         Serial.println("OFFLINE_WDT !! REBOOTING...");
         delay(3000);  //to printout
@@ -254,7 +255,12 @@ void loop() {
   memset(utc_timestr, 0, sizeof(utc_timestr));
   strftime(utc_timestr, 22, "%FT%TZ", &timeinfo);
 
-  lcd_in_main_loop(utc_timestr);
+
+
+  Serial.print("freemem=");
+  Serial.println(freemem);
+  lcd_in_main_loop(utc_timestr, freemem);
+
 
   if (in_OTA || (millis() - sample_ms) < sample_period) {
     goto LOOP_DONE;
@@ -263,7 +269,7 @@ void loop() {
 
   datempSensor.requestTemperatures();   // send the command to get temperatures
   t = datempSensor.getTempCByIndex(0);  // read temperature in Celsius
-  if (t <= -20) {
+  if (t <= -50) {
     Serial.println("ERROR reading DALLAS t");
     // Read temperature as Celsius (the default)
     // t = (double)dht.readTemperature();
@@ -283,7 +289,7 @@ void loop() {
   // check again
   firebase_ready = Firebase.ready();
   if (firebase_ready) {
-
+    Serial.println("firebase ready");
     if (!device_doc_exist) {
       if (Firebase.Firestore.getDocument(&fbdo, FIREBASE_PROJECT_ID, "", DEVICE_DOC_PATH, "") || create_device_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, DEVICE)) {
         create_positions_doc(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH, "--", utc_timestr);
@@ -344,7 +350,7 @@ void loop() {
     }
 
 
-    if (fault_record || t >= -20) {
+    if (fault_record || t >= -50) {
       if ((!disable_delta) && ((millis() - upload_ms) < DELTA_UPLOAD_PERIOD)) {
         double t_delta = abs(t - t_uploaded);
         if (t_delta < 1) {
@@ -368,7 +374,7 @@ void loop() {
       documentPath += utc_timestr;
 
       if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "" /* databaseId can be (default) or empty */, documentPath, content.raw())) {
-        Serial.printf("%s [%s]: %f\r\n", utc_timestr, DEVICE, t);
+        Serial.printf("%s [%s]: %f\n", utc_timestr, DEVICE, t);
       } else {
         Serial.println("ERROR adding records!!");
         Serial.println(fbdo.errorReason());
@@ -380,7 +386,8 @@ void loop() {
   }
 
 LOOP_DONE:
-  delay(1);
+  Serial.println("main loop done");
+  delay(200);
 }
 
 static bool create_device_doc(FirebaseData *fbdo, char const *project, char const *device_doc_path, char const *name) {
@@ -531,11 +538,13 @@ static int th_version(FirebaseData *fbdo, char const *project, char const *devic
 }
 
 static int xoff = 0;
-static void lcd_in_main_loop(char const *timestr) {
+static void lcd_in_main_loop(char const *timestr, int freemem) {
 #ifndef ARDUINO_NANO_ESP32
   String ip_string = (ip_ready) ? WiFi.localIP().toString() : String("0.0.0.0");
   String fready_string = String("firebase_ready: ");
   fready_string.concat(String(firebase_ready));
+  fready_string.concat(", ");
+  fready_string.concat(String(freemem));
   String t_string = String("T: ");
   t_string.concat(String(t));
 
