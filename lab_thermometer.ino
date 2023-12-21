@@ -5,7 +5,7 @@
 #include <addons/TokenHelper.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-
+#include "soc/rtc_wdt.h"
 
 #ifdef ARDUINO_NANO_ESP32
 #define DHTPIN 1  // A0, Digital pin connected to the DHT sensor
@@ -178,6 +178,10 @@ void setup() {
   fbdo.keepAlive(5, 5, 1);
   // ArduinoOTA.begin();
   wdt_check_ms = millis();
+  rtc_wdt_protect_off();
+  rtc_wdt_enable();
+  rtc_wdt_feed();
+  rtc_wdt_set_time(RTC_WDT_STAGE0, 180000);
 }
 
 bool device_doc_exist = false;
@@ -210,6 +214,7 @@ void loop() {
   if (!led_blink)
     digitalWrite(LED_PIN, OFF);
 
+  rtc_wdt_feed();
   // ArduinoOTA.handle();
 
   if ((millis() - main_loop_ms) > MAIN_LOOP_DELAY) {
@@ -555,9 +560,10 @@ static void lcd_in_main_loop(char const *timestr, int freemem) {
   do {
 
     u8g2.drawStr(0, 8, DEVICE);
-    u8g2.drawStr(xoff, 18, ip_string.c_str());
-    u8g2.drawStr(xoff, 28, fready_string.c_str());
-    u8g2.drawStr(xoff, 38, t_string.c_str());
+    u8g2.drawStr(0, 18, WIFI_SSID);
+    u8g2.drawStr(xoff, 28, ip_string.c_str());
+    u8g2.drawStr(xoff, 38, fready_string.c_str());
+    u8g2.drawStr(xoff, 48, t_string.c_str());
     if (timestr != NULL)
       u8g2.drawStr(0, 62, timestr);
   } while (u8g2.nextPage());
