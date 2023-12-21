@@ -292,6 +292,7 @@ void loop() {
   Serial.println(t);
 
   // check again
+
   firebase_ready = Firebase.ready();
   if (firebase_ready) {
     Serial.println("firebase ready");
@@ -326,8 +327,8 @@ void loop() {
       }
     }
 
-    led_blink = led_blink_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
-    Serial.printf("led_blink: %d\n", led_blink);
+    // led_blink = led_blink_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
+    // Serial.printf("led_blink: %d\n", led_blink);
     fault_record = th_fault_record_enabled(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
     Serial.printf("fault_record: %d\n", fault_record);
     bool s = th_suspended(&fbdo, FIREBASE_PROJECT_ID, DEVICE_DOC_PATH);
@@ -442,18 +443,18 @@ static bool create_positions_doc(FirebaseData *fbdo, const char *project, char c
 }
 
 static bool led_blink_enabled(FirebaseData *fbdo, char const *project, char const *device_doc_path) {
-  if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, LED_BLINK)) {
+  // if (Firebase.Firestore.getDocument(fbdo, project, "", device_doc_path, LED_BLINK)) {
 
-    // Create a FirebaseJson object and set content with received payload
-    FirebaseJson payload;
-    if (payload.setJsonData(fbdo->payload().c_str())) {
-      // Get the data from FirebaseJson object
-      FirebaseJsonData jsonData;
-      if (payload.get(jsonData, "fields/" LED_BLINK "/booleanValue", false) && jsonData.boolValue == true) {
-        return true;
-      }
-    }
-  }
+  //   // Create a FirebaseJson object and set content with received payload
+  //   FirebaseJson payload;
+  //   if (payload.setJsonData(fbdo->payload().c_str())) {
+  //     // Get the data from FirebaseJson object
+  //     FirebaseJsonData jsonData;
+  //     if (payload.get(jsonData, "fields/" LED_BLINK "/booleanValue", false) && jsonData.boolValue == true) {
+  //       return true;
+  //     }
+  //   }
+  // }
   return false;
 }
 
